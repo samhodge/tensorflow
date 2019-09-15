@@ -7,9 +7,9 @@ before_install:
   - pip3 install -U --user pip six numpy wheel setuptools mock 'future>=0.17.1'
   - pip3 install -U --user keras_applications==1.0.6 --no-deps
   - pip3 install -U --user keras_preprocessing==1.0.5 --no-deps
-  - wget https://github.com/bazelbuild/bazel/releases/download/0.19.2/bazel-0.19.2-installer-linux-x86_64.sh
-  - chmod +x bazel-0.19.2-installer-linux-x86_64.sh
-  - ./bazel-0.19.2-installer-linux-x86_64.sh --user
+  - wget https://github.com/bazelbuild/bazel/releases/download/0.19.2/bazel-0.19.2-installer-darwin-x86_64.sh
+  - chmod +x bazel-0.19.2-installer-darwin-x86_64.sh
+  - ./bazel-0.19.2-installer-darwin-x86_64.sh --user
 
 before_script:
  - git lfs pull

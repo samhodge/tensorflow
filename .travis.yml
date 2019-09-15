@@ -1,0 +1,24 @@
+language: c++
+os:
+  - osx
+
+before_install:
+  - brew install git-lfs
+  - wget https://github.com/bazelbuild/bazel/releases/download/0.19.2/bazel-0.19.2-installer-linux-x86_64.sh; fi
+  - chmod +x bazel-0.19.2-installer-linux-x86_64.sh; fi
+  - ./bazel-0.19.2-installer-linux-x86_64.sh --user; fi
+  - brew install python@3
+  - brew install pip
+  - pip3 install -U --user pip six numpy wheel setuptools mock 'future>=0.17.1'
+  - pip3 install -U --user keras_applications==1.0.6 --no-deps
+  - pip3 install -U --user keras_preprocessing==1.0.5 --no-deps
+
+before_script:
+ - git lfs pull
+
+branches:
+  only:
+  - v1.13.1-travis-kognat
+
+script:
+  - ./tensorflow/tools/ci_build/osx/cpu/run_py3_cc_core.sh

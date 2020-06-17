@@ -21,12 +21,12 @@ limitations under the License.
 #include "tensorflow/cc/ops/standard_ops.h"
 #include "tensorflow/compiler/tf2xla/xla_op_kernel.h"
 #include "tensorflow/compiler/tf2xla/xla_op_registry.h"
+#include "tensorflow/core/common_runtime/graph_def_builder_util.h"
 #include "tensorflow/core/framework/attr_value.pb.h"
 #include "tensorflow/core/framework/function.h"
 #include "tensorflow/core/framework/graph_to_functiondef.h"
 #include "tensorflow/core/framework/node_def_util.h"
 #include "tensorflow/core/graph/graph_def_builder.h"
-#include "tensorflow/core/graph/graph_def_builder_util.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
 #include "tensorflow/core/platform/test.h"
 
@@ -82,7 +82,8 @@ class CompilabilityCheckUtilTest : public ::testing::Test {
   FunctionLibraryRuntime* GetFunctionLibraryRuntime() {
     OptimizerOptions opts;
     pflr_ = absl::make_unique<ProcessFunctionLibraryRuntime>(
-        nullptr, Env::Default(), TF_GRAPH_DEF_VERSION, flib_def_.get(), opts);
+        nullptr, Env::Default(), /*config=*/nullptr, TF_GRAPH_DEF_VERSION,
+        flib_def_.get(), opts);
 
     return pflr_->GetFLR(ProcessFunctionLibraryRuntime::kDefaultFLRDevice);
   }

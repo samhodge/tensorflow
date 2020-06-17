@@ -53,6 +53,7 @@ bool SupportsQuantization(Model* model, const Operator& op) {
       OperatorType::kConv,
       OperatorType::kDepthToSpace,
       OperatorType::kDepthwiseConv,
+      OperatorType::kDiv,
       OperatorType::kEqual,
       OperatorType::kExpandDims,
       OperatorType::kFullyConnected,
@@ -243,6 +244,13 @@ bool ChooseQuantizationForOperatorInput(
       weights_input_index = 1;
     }
   }
+  if (op.type == OperatorType::kTransposeConv) {
+    if (input_index == 3) {
+      is_bias_vector = true;
+      activations_input_index = 2;
+      weights_input_index = 1;
+    }
+  }
   if (op.type == OperatorType::kLstmCell) {
     if (input_index == LstmCellOperator::BIASES_INPUT) {
       is_bias_vector = true;
@@ -403,7 +411,8 @@ bool ChooseQuantizationForOperatorOutput(
       op.type == OperatorType::kSpaceToDepth ||
       op.type == OperatorType::kReshape || op.type == OperatorType::kSplit ||
       op.type == OperatorType::kRelu || op.type == OperatorType::kRelu1 ||
-      op.type == OperatorType::kRelu6 || op.type == OperatorType::kPRelu) {
+      op.type == OperatorType::kRelu6 || op.type == OperatorType::kPRelu ||
+      op.type == OperatorType::kUnpack) {
     int data_input_index = 0;
     if (op.type == OperatorType::kSplit) {
       data_input_index = 1;

@@ -20,6 +20,8 @@ from __future__ import print_function
 import functools
 import weakref
 
+from absl import logging
+
 from tensorflow.python.eager import context
 from tensorflow.python.eager import def_function
 from tensorflow.python.eager import function as defun
@@ -101,12 +103,20 @@ class AutoTrackable(base.Trackable):
     """Return a dict of `Function`s of a trackable."""
     functions = {}
     for attribute_name in dir(self):
+      # We get the attributes, suppressing warnings and exceptions.
+      logging_verbosity = logging.get_verbosity()
       try:
+        logging.set_verbosity(logging.FATAL)
         attribute_value = getattr(self, attribute_name, None)
       except Exception:  # pylint: disable=broad-except
         # We really don't want to throw an exception just because some object's
         # attribute accessor is broken.
         attribute_value = None
+      finally:
+        # We reset the verbosity setting in a `finally` block, to make
+        # sure it always happens, even if we make the exception catching above
+        # be less broad.
+        logging.set_verbosity(logging_verbosity)
       if isinstance(attribute_value, (def_function.Function,
                                       defun.ConcreteFunction)):
         functions[attribute_name] = attribute_value
@@ -321,8 +331,8 @@ class Asset(base.Trackable):
     # initialization graph, since it is transient and should not end up in a
     # serialized function body.
     with ops.init_scope(), ops.device("CPU"):
-      self._path = ops.internal_convert_to_tensor(path, dtype=dtypes.string,
-                                                  name="asset_path")
+      self._path = ops.convert_to_tensor(
+          path, dtype=dtypes.string, name="asset_path")
 
   @property
   def asset_path(self):
@@ -426,5 +436,4 @@ def cached_per_instance(f):
 
 
 ops.register_tensor_conversion_function(
-    Asset,
-    lambda asset, **kw: ops.internal_convert_to_tensor(asset.asset_path, **kw))
+    Asset, lambda asset, **kw: ops.convert_to_tensor(asset.asset_path, **kw))

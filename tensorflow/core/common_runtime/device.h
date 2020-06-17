@@ -92,16 +92,6 @@ class Device : public DeviceBase {
     op_kernel->ComputeAsync(context, std::move(done));
   }
 
-  // Takes ownership of the references in tensors. If necessary, a
-  // device may override this method to keep a reference to the
-  // accessed tensors until the async computation has completed.
-  virtual void ConsumeListOfAccessedTensors(
-      DeviceContext* context, const TensorReferenceVector& tensors) {
-    for (const auto& ref : tensors) {
-      ref.Unref();
-    }
-  }
-
   // Blocks until all operations queued on the device at the time of
   // the call have completed.  Returns any error pending on the device
   // at completion.
@@ -148,13 +138,14 @@ class Device : public DeviceBase {
     return Status::OK();
   }
 
-  // Fill in the context map for the graph. Default behavior is to do
-  // nothing.
+  // Sets `out_context` a new DeviceContext* for executing a graph, or nullptr
+  // if the device does not support contexts. Returns an error status if any
+  // error occurred while trying to create a context, otherwise OK.
   //
-  // The caller takes ownership over the DeviceContext objects given
-  // by the device.
-  virtual Status FillContextMap(const Graph* graph,
-                                DeviceContextMap* device_context_map) {
+  // The caller takes ownership of one reference on the output DeviceContext*,
+  // and should call Unref().
+  virtual Status TryGetDeviceContext(DeviceContext** out_context) {
+    *out_context = nullptr;
     return Status::OK();
   }
 

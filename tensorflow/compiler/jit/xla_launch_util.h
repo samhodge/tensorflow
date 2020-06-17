@@ -18,7 +18,6 @@ limitations under the License.
 #ifndef TENSORFLOW_COMPILER_JIT_XLA_LAUNCH_UTIL_H_
 #define TENSORFLOW_COMPILER_JIT_XLA_LAUNCH_UTIL_H_
 
-#include "absl/base/thread_annotations.h"
 #include "tensorflow/compiler/jit/xla_compilation_cache.h"
 #include "tensorflow/compiler/jit/xla_tensor.h"
 #include "tensorflow/compiler/tf2xla/xla_compiler.h"
@@ -30,6 +29,7 @@ limitations under the License.
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/gtl/array_slice.h"
+#include "tensorflow/core/platform/thread_annotations.h"
 #include "tensorflow/stream_executor/device_memory_allocator.h"
 
 namespace tensorflow {
@@ -102,7 +102,7 @@ class VariableInfo {
 // `variables` is allowed to contain instances that don't track a resource
 // variable (i.e. variables[i].var() can be null for some i).
 Status LockVariables(absl::Span<VariableInfo> variables)
-    EXCLUSIVE_LOCK_FUNCTION();
+    TF_EXCLUSIVE_LOCK_FUNCTION();
 
 // Helper class to perform the marshalling of TensorFlow inputs and outputs to
 // ShapedBuffers suitable for passing to an XLA computation.
@@ -136,7 +136,7 @@ class XlaComputationLaunchContext {
   // input_mapping must be greater than or equal to `missing_ctx_input_prefix`
   // (in other words, no inputs actually required by the kernel can be missing).
   void PopulateInputs(OpKernelContext* ctx,
-                      const XlaCompiler::CompilationResult* kernel,
+                      const XlaCompiler::CompilationResult* compilation_result,
                       const std::map<int, OptionalTensor>& variables,
                       int missing_ctx_input_prefix);
 
@@ -148,28 +148,25 @@ class XlaComputationLaunchContext {
   // See jit/resource_operation_safety_analysis for details.
   //
   //
-  // Assumes that the first `missing_ctx_input_prefix` inputs to the kernel are
-  // missing and adjusts input indices accordingly.
+  // Assumes that the first `missing_ctx_input_prefix` inputs to the
+  // compilation_result are missing and adjusts input indices accordingly.
   Status PopulateOutputs(
-      OpKernelContext* ctx, const XlaCompiler::CompilationResult* kernel,
+      OpKernelContext* ctx,
+      const XlaCompiler::CompilationResult* compilation_result,
       xla::ScopedShapedBuffer output, int missing_ctx_input_prefix,
-      const xla::HloInputOutputAliasConfig& input_output_alias);
+      const xla::HloInputOutputAliasConfig& input_output_alias,
+      const std::map<int, OptionalTensor>& resource_var_snapshots);
 
   // Return the argument list. Only valid after PopulateInputs() has been
   // called.
   const std::vector<xla::ShapedBuffer*>& arguments() const { return arg_ptrs_; }
 
  private:
-  Tensor MakeOutputTensor(
-      DataType type, const TensorShape& shape, se::DeviceMemoryBase buffer,
-      int output_num, const xla::HloInputOutputAliasConfig& input_output_alias,
-      Allocator* allocator);
-
   xla::LocalClient* client_;
   se::DeviceMemoryAllocator* xla_allocator_;
   bool allocate_xla_tensors_;
   bool use_multiple_streams_;
-  std::vector<std::unique_ptr<xla::ShapedBuffer>> arg_buffers_;
+  std::deque<xla::ShapedBuffer> arg_buffers_;
   std::vector<xla::ShapedBuffer*> arg_ptrs_;
 };
 
@@ -196,19 +193,6 @@ class XlaTensorBuffer : public TensorBuffer {
 
   void FillAllocationDescription(AllocationDescription* proto) const override {
     proto->set_allocated_bytes(actual_size_);
-  }
-
-  static Tensor MakeTensor(DataType dtype, const TensorShape& shape,
-                           bool unref_buffer, se::DeviceMemoryBase buffer,
-                           Allocator* allocator) {
-    size_t expected_size = shape.num_elements() * DataTypeSize(dtype);
-    auto* tensor_buffer = new XlaTensorBuffer(buffer.opaque(), expected_size,
-                                              buffer.size(), allocator);
-    Tensor t(dtype, shape, tensor_buffer);
-    if (unref_buffer) {
-      tensor_buffer->Unref();
-    }
-    return t;
   }
 
  private:

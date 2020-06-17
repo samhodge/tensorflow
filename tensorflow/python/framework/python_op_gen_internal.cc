@@ -23,6 +23,7 @@ limitations under the License.
 #include <unordered_map>
 
 #include "absl/strings/escaping.h"
+#include "absl/strings/str_replace.h"
 #include "tensorflow/core/framework/api_def.pb.h"
 #include "tensorflow/core/framework/attr_value.pb.h"
 #include "tensorflow/core/framework/op.h"
@@ -34,7 +35,6 @@ limitations under the License.
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/framework/types.pb.h"
 #include "tensorflow/core/lib/gtl/map_util.h"
-#include "tensorflow/core/lib/gtl/stl_util.h"
 #include "tensorflow/core/lib/strings/str_util.h"
 #include "tensorflow/core/lib/strings/strcat.h"
 #include "tensorflow/core/lib/strings/stringprintf.h"
@@ -108,19 +108,8 @@ bool IsOpWithUnderscorePrefix(const string& s) {
 }
 
 string AvoidPythonReserved(const string& s) {
-  const char namespace_separator = '>';
-  const char joiner = '_';
-  const int last_index = s.size();
-  string result;
-  for (int i = 0; i < last_index; ++i) {
-    const char c = s[i];
-    // Convert namespace separators ('>' characters) to joiners
-    if (c == namespace_separator) {
-      result.push_back(joiner);
-    } else {
-      result.push_back(c);
-    }
-  }
+  // Convert namespace separators ('>' characters) to joiners
+  string result = absl::StrReplaceAll(s, {{">", "_"}});
 
   if (IsPythonReserved(result)) return strings::StrCat(result, "_");
   return result;
@@ -460,7 +449,12 @@ string AttrValueToPython(const string& type, const AttrValue& value,
       std::ostringstream s;
       s.imbue(std::locale::classic());
       s << std::setprecision(FLT_DIG) << value.f();
-      return s.str();
+      // If there is no I/O error for `std::ostringstream s` return s.str(),
+      // otherwise fallback to strings::StrCat(value.f()).
+      if (s.good()) {
+        return s.str();
+      }
+      return strings::StrCat(value.f());
     }
   } else if (type == "bool") {
     return value.b() ? "True" : "False";
@@ -800,9 +794,10 @@ void GenPythonOp::AddOutputGlobals() {
       out_names.push_back(strings::StrCat("\"", out_name, "\""));
     }
 
-    strings::StrAppend(&prelude_, "_", op_def_.name(),
+    strings::StrAppend(&prelude_, "_", AvoidPythonReserved(op_def_.name()),
                        "Output = collections.namedtuple(\n");
-    strings::StrAppend(&prelude_, "    \"", op_def_.name(), "\",\n");
+    strings::StrAppend(&prelude_, "    \"", AvoidPythonReserved(op_def_.name()),
+                       "\",\n");
     strings::StrAppend(&prelude_, "    [", absl::StrJoin(out_names, ", "),
                        "])");
     strings::StrAppend(&prelude_, "\n\n");
@@ -825,7 +820,8 @@ void GenPythonOp::AddBody(const string& prefix) {
       prefix, "_result = _op_def_lib.apply_op(\"", op_def_.name(), "\", ");
   AddBodyNoReturn(apply_prefix);
   if (num_outs_ > 1) {
-    strings::StrAppend(&result_, prefix, "_result = _", op_def_.name(),
+    strings::StrAppend(&result_, prefix, "_result = _",
+                       AvoidPythonReserved(op_def_.name()),
                        "Output._make(_result)\n");
   }
   strings::StrAppend(&result_, prefix, "return _result\n");

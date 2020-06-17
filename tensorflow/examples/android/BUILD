@@ -53,7 +53,7 @@ cc_library(
     name = "tensorflow_native_libs",
     srcs = [
         ":libtensorflow_demo.so",
-        "//tensorflow/contrib/android:libtensorflow_inference.so",
+        "//tensorflow/tools/android/inference_interface:libtensorflow_inference.so",
     ],
     tags = [
         "manual",
@@ -66,7 +66,6 @@ android_binary(
     srcs = glob([
         "src/**/*.java",
     ]),
-    aapt_version = "aapt2",
     # Package assets from assets dir as well as all model targets. Remove undesired models
     # (and corresponding Activities in source) to reduce APK size.
     assets = [
@@ -75,7 +74,6 @@ android_binary(
     ],
     assets_dir = "",
     custom_package = "org.tensorflow.demo",
-    inline_constants = 1,
     manifest = "AndroidManifest.xml",
     resource_files = glob(["res/**"]),
     tags = [
@@ -84,7 +82,7 @@ android_binary(
     ],
     deps = [
         ":tensorflow_native_libs",
-        "//tensorflow/contrib/android:android_tensorflow_inference_java",
+        "//tensorflow/tools/android/inference_interface:android_tensorflow_inference_java",
     ],
 )
 

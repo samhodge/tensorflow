@@ -42,16 +42,89 @@ limitations under the License.
 
 namespace xla {
 
+// TODO(b/150633678): Both the ExecutionInput and ExecutionOutput need to be
+// revisited, with the execute APIs taking data structure which can better model
+// shareable buffers.
+//
+// ExecutionInput buffers are in one of three states:
+//
+// 1) Owned by the caller and immutable.
+// 2) Donated by the caller but returned on error.
+// 3) Donated by the caller and freed on error.
+//
+// Case (1) buffers are stored as MaybeOwningDeviceMemory(DeviceMemoryBase).
+// Case (2) buffers are stored as MaybeOwningDeviceMemory(OwningDeviceMemory),
+//   with their indices present in unowned_indices_.
+// Case (3) buffers are stored as MaybeOwningDeviceMemory(OwningDeviceMemory),
+//   with their indices absent from unowned_indices_.
+class ExecutionInput {
+ public:
+  ExecutionInput() = default;
+  explicit ExecutionInput(xla::Shape shape) : buffers_(std::move(shape)) {}
+  explicit ExecutionInput(ShapeTree<MaybeOwningDeviceMemory> buffers)
+      : buffers_(std::move(buffers)) {}
+  ExecutionInput(ExecutionInput&&) = default;
+
+  ~ExecutionInput() {
+    for (auto& index : unowned_indices_) {
+      auto buffer = buffers_.mutable_element(index)->Release();
+      if (buffer) {
+        buffer->Release();
+      }
+    }
+  }
+
+  ExecutionInput& operator=(ExecutionInput&&) = default;
+
+  const Shape& shape() const { return buffers_.shape(); }
+
+  void SetBuffer(const ShapeIndex& index, MaybeOwningDeviceMemory buffer) {
+    *buffers_.mutable_element(index) = std::move(buffer);
+  }
+
+  void SetUnownedBuffer(const ShapeIndex& index,
+                        MaybeOwningDeviceMemory buffer) {
+    *buffers_.mutable_element(index) = std::move(buffer);
+    unowned_indices_.push_back(index);
+  }
+
+  void SetUnownedIndex(const ShapeIndex& index) {
+    unowned_indices_.push_back(index);
+  }
+
+  const ShapeTree<MaybeOwningDeviceMemory>& Buffers() const { return buffers_; }
+
+  ShapeTree<MaybeOwningDeviceMemory>* MutableBuffers() { return &buffers_; }
+
+  MaybeOwningDeviceMemory* MutableBuffer(const ShapeIndex& index) {
+    return buffers_.mutable_element(index);
+  }
+
+  const MaybeOwningDeviceMemory& Buffer(const ShapeIndex& index) const {
+    return buffers_.element(index);
+  }
+
+ private:
+  ShapeTree<MaybeOwningDeviceMemory> buffers_;
+  // (Unordered) set of indices of buffers that should be returned to the
+  // caller if an error occurs when enqueuing the computation.
+  std::vector<ShapeIndex> unowned_indices_;
+};
+
 // ExecutionOutput encapsulates the output buffers of a execution and the
 // leftover buffers to be released by the caller.
 class ExecutionOutput {
  public:
+  explicit ExecutionOutput(ScopedShapedBuffer result)
+      : result_(std::move(result)) {}
   ExecutionOutput(ScopedShapedBuffer result,
-                  std::vector<se::OwningDeviceMemory> to_be_released,
-                  std::vector<ShapeIndex> aliased_indices)
+                  std::vector<se::OwningDeviceMemory> to_be_released)
       : result_(std::move(result)),
-        to_be_released_(std::move(to_be_released)),
-        aliased_indices_(std::move(aliased_indices)) {}
+        to_be_released_(std::move(to_be_released)) {}
+  ExecutionOutput(Shape on_host_shape, Shape on_device_shape,
+                  se::DeviceMemoryAllocator* allocator, int device_ordinal)
+      : result_(std::move(on_host_shape), std::move(on_device_shape), allocator,
+                device_ordinal) {}
   ExecutionOutput(ExecutionOutput&&) = default;
   ExecutionOutput& operator=(ExecutionOutput&&) = default;
 
@@ -64,6 +137,15 @@ class ExecutionOutput {
     }
   }
 
+  void AddAliasedIndex(ShapeIndex index) {
+    aliased_indices_.push_back(std::move(index));
+  }
+
+  void AddToBeReleased(se::OwningDeviceMemory mem) {
+    to_be_released_.push_back(std::move(mem));
+  }
+
+
   // Should be called once it is known that the execute operation succeeded,
   // before returning the ExecutionOutput to the caller.
   ExecutionOutput& Commit() {
@@ -72,6 +154,8 @@ class ExecutionOutput {
   }
 
   const ScopedShapedBuffer& Result() const { return result_; }
+
+  ScopedShapedBuffer* MutableResult() { return &result_; }
 
   ScopedShapedBuffer ConsumeResult() {
     aliased_indices_.clear();
@@ -98,6 +182,10 @@ class ExecutionOutput {
   // the buffer, so we track the indices here, and unless the ExecutionOutput is
   // committed, we remove them from the result_ before destruction.
   std::vector<ShapeIndex> aliased_indices_;
+
+  // A shape table is a continuous region in memory that is used to hold the
+  // runtime dimension sizes of dynamic output shapes.
+  se::OwningDeviceMemory output_shape_table_;
 };
 
 // A given platform's compiler will produce an Executable -- this is a uniform
@@ -146,22 +234,22 @@ class Executable {
   // If the hlo_execution_profile is provided as non-nullptr, profiling will be
   // enabled. Note that profiling is tricky to use correctly, as the profiling
   // objects (when they exist) must out-live the task.
-  virtual StatusOr<ScopedShapedBuffer> ExecuteAsyncOnStream(
+  StatusOr<ScopedShapedBuffer> ExecuteAsyncOnStream(
       const ServiceExecutableRunOptions* run_options,
       absl::Span<const ShapedBuffer* const> arguments,
-      HloExecutionProfile* hlo_execution_profile) = 0;
+      HloExecutionProfile* hlo_execution_profile);
 
   // Same as ExecuteAsyncOnStream(), but blocks waiting for the computation to
   // complete.
   StatusOr<ExecutionOutput> ExecuteOnStream(
       const ServiceExecutableRunOptions* run_options,
-      std::vector<ShapeTree<xla::MaybeOwningDeviceMemory>> arguments,
+      std::vector<ExecutionInput> arguments,
       HloExecutionProfile* hlo_execution_profile);
 
   virtual StatusOr<ExecutionOutput> ExecuteAsyncOnStream(
       const ServiceExecutableRunOptions* run_options,
-      std::vector<ShapeTree<xla::MaybeOwningDeviceMemory>> arguments,
-      HloExecutionProfile* hlo_execution_profile);
+      std::vector<ExecutionInput> arguments,
+      HloExecutionProfile* hlo_execution_profile) = 0;
 
   // Same as ExecuteOnStream(), but runs this executable on multiple
   // streams. arguments[i] contains the arguments to the execution on
@@ -188,9 +276,17 @@ class Executable {
       const ServiceExecutableRunOptions* run_options,
       absl::Span<const ShapedBuffer* const> arguments);
 
+  StatusOr<ExecutionOutput> ExecuteOnStreamWrapper(
+      const ServiceExecutableRunOptions* run_options,
+      std::vector<ExecutionInput> arguments);
+
   StatusOr<ScopedShapedBuffer> ExecuteAsyncOnStreamWrapper(
       const ServiceExecutableRunOptions* run_options,
       absl::Span<const ShapedBuffer* const> arguments);
+
+  StatusOr<ExecutionOutput> ExecuteAsyncOnStreamWrapper(
+      const ServiceExecutableRunOptions* run_options,
+      std::vector<ExecutionInput> arguments);
 
   const HloProfilePrinterData& hlo_profile_printer_data() const {
     CHECK(hlo_profiling_enabled());
@@ -226,7 +322,7 @@ class Executable {
   // not supported by the executable.
   //
   // Does not include the size of used libraries (e.g. cuDNN, Eigen, etc.).
-  virtual int64 SizeOfGeneratedCodeInBytes();
+  virtual int64 SizeOfGeneratedCodeInBytes() const;
 
   // Dumping helpers.
   void set_hlo_proto(std::unique_ptr<xla::HloProto> hlo_proto) {
@@ -234,6 +330,15 @@ class Executable {
   }
   bool dumping_snapshot() const { return hlo_proto_ != nullptr; }
   HloProto const* hlo_proto() const { return hlo_proto_.get(); }
+
+  // Gather unused but donated buffers, return them to the caller of this API.
+  // We don't free buffers inside this function since the caller could have
+  // different preferences for buffer deallocation. For example, in TensorFlow,
+  // buffers are mostly efficiently deallocated as soon as a program has been
+  // launched. However, in XRT, the buffers are expected to be deallocated after
+  // the program has finished since XRT doesn't support async deallocation.
+  void MarkToBeReleasedArguments(absl::Span<ExecutionInput> arguments,
+                                 ExecutionOutput& result);
 
  protected:
   // HloModule this was compiled from. BufferAssignment keeps pointers to

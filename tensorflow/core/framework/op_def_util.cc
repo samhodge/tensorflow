@@ -734,10 +734,13 @@ Status OpDefAttrDefaultsUnchanged(const OpDef& old_op, const OpDef& new_op) {
     const OpDef::AttrDef* new_attr =
         gtl::FindPtrOrNull(new_attrs, old_attr.name());
     if (new_attr == nullptr) continue;
-    if (old_attr.has_default_value() != new_attr->has_default_value()) {
+    if (new_attr->has_default_value() && !old_attr.has_default_value()) {
+      continue;  // Adding new default values is safe.
+    }
+    if (old_attr.has_default_value() && !new_attr->has_default_value()) {
       return errors::InvalidArgument(
-          "Attr '", old_attr.name(), "' has added/removed it's default; ",
-          "from ", DefaultAttrStr(old_attr), " to ", DefaultAttrStr(*new_attr));
+          "Attr '", old_attr.name(), "' has removed it's default; ", "from ",
+          DefaultAttrStr(old_attr), " to ", DefaultAttrStr(*new_attr));
     }
     if (old_attr.has_default_value() &&
         !AreAttrValuesEqual(old_attr.default_value(),
@@ -780,11 +783,13 @@ void RemoveDescriptionsFromOpList(OpList* op_list) {
 }
 
 bool AttrDefEqual(const OpDef::AttrDef& a1, const OpDef::AttrDef& a2) {
-#ifndef TENSORFLOW_LITE_PROTOS
-  DCHECK_EQ(7, a1.GetDescriptor()->field_count())
-      << "Please modify these equality and hash functions to reflect the "
-         "changes to the AttrDef protobuf";
-#endif  // TENSORFLOW_LITE_PROTOS
+  if (std::is_base_of<protobuf::Message, OpDef::AttrDef>()) {
+    DCHECK_EQ(7, reinterpret_cast<const protobuf::Message*>(&a1)
+                     ->GetDescriptor()
+                     ->field_count())
+        << "Please modify these equality and hash functions to reflect the "
+           "changes to the AttrDef protobuf";
+  }
 
   if (a1.name() != a2.name()) return false;
   if (a1.type() != a2.type()) return false;

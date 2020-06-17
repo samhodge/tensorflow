@@ -21,6 +21,7 @@ from __future__ import print_function
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import array_ops
+from tensorflow.python.ops import gen_array_ops
 from tensorflow.python.ops import gen_string_ops
 from tensorflow.python.ops import string_ops
 from tensorflow.python.ops.ragged import ragged_array_ops
@@ -28,10 +29,12 @@ from tensorflow.python.ops.ragged import ragged_math_ops
 from tensorflow.python.ops.ragged import ragged_tensor
 from tensorflow.python.util import compat as util_compat
 from tensorflow.python.util import deprecation
+from tensorflow.python.util import dispatch
 from tensorflow.python.util.tf_export import tf_export
 
 
 @tf_export("strings.bytes_split")
+@dispatch.add_dispatch_support
 def string_bytes_split(input, name=None):  # pylint: disable=redefined-builtin
   """Split string elements of `input` into bytes.
 
@@ -79,6 +82,7 @@ def string_bytes_split(input, name=None):  # pylint: disable=redefined-builtin
 
 # pylint: disable=redefined-builtin
 @tf_export("strings.unicode_encode")
+@dispatch.add_dispatch_support
 def unicode_encode(input,
                    output_encoding,
                    errors="replace",
@@ -176,6 +180,7 @@ def unicode_encode(input,
 
 # pylint: disable=redefined-builtin
 @tf_export("strings.unicode_decode")
+@dispatch.add_dispatch_support
 def unicode_decode(input,
                    input_encoding,
                    errors="replace",
@@ -221,6 +226,7 @@ def unicode_decode(input,
 
 
 @tf_export("strings.unicode_decode_with_offsets")
+@dispatch.add_dispatch_support
 def unicode_decode_with_offsets(input,
                                 input_encoding,
                                 errors="replace",
@@ -282,6 +288,7 @@ def unicode_decode_with_offsets(input,
 
 
 @tf_export("strings.unicode_split")
+@dispatch.add_dispatch_support
 def unicode_split(input,
                   input_encoding,
                   errors="replace",
@@ -329,6 +336,7 @@ def unicode_split(input,
 
 
 @tf_export("strings.unicode_split_with_offsets")
+@dispatch.add_dispatch_support
 def unicode_split_with_offsets(input,
                                input_encoding,
                                errors="replace",
@@ -410,7 +418,7 @@ def _unicode_decode(input, input_encoding, errors, replacement_char,
       input = input.with_flat_values(
           ragged_tensor.RaggedTensor.from_tensor(
               input.flat_values,
-              ragged_rank=input_ndims - input.ragged_rank + 1))
+              ragged_rank=input_ndims - input.ragged_rank - 1))
 
   # Reshape the input to a flat vector, and apply the gen_string_ops op.
   if ragged_tensor.is_ragged(input):
@@ -452,12 +460,13 @@ def _unicode_decode(input, input_encoding, errors, replacement_char,
 
 
 @tf_export("strings.split", v1=[])
+@dispatch.add_dispatch_support
 def string_split_v2(input, sep=None, maxsplit=-1, name=None):  # pylint: disable=redefined-builtin
   """Split elements of `input` based on `sep` into a `RaggedTensor`.
 
   Let N be the size of `input` (typically N will be the batch size). Split each
-  element of `input` based on `sep` and return a `SparseTensor` or
-  `RaggedTensor` containing the split tokens. Empty tokens are ignored.
+  element of `input` based on `sep` and return a `RaggedTensor` containing the 
+  split tokens. Empty tokens are ignored.
 
   Example:
 
@@ -513,6 +522,7 @@ def string_split_v2(input, sep=None, maxsplit=-1, name=None):  # pylint: disable
 
 
 @tf_export(v1=["string_split"])
+@dispatch.add_dispatch_support
 @deprecation.deprecated_args(None,
                              "delimiter is deprecated, please use sep instead.",
                              "delimiter")
@@ -577,6 +587,7 @@ def string_split(source, sep=None, skip_empty=True, delimiter=None,
 # In TensorFlow 1.x, "tf.strings.split" uses the new signature (with maxsplit),
 # but we need to add the result_type argument.
 @tf_export(v1=["strings.split"])
+@dispatch.add_dispatch_support
 def strings_split_v1(input=None, sep=None, maxsplit=-1,  # pylint: disable=redefined-builtin
                      result_type="SparseTensor", source=None, name=None):
   """Split elements of `input` based on `sep`.
@@ -627,14 +638,17 @@ def strings_split_v1(input=None, sep=None, maxsplit=-1,  # pylint: disable=redef
   with ops.name_scope(name, "StringSplit", [input]):
     input = ragged_tensor.convert_to_tensor_or_ragged_tensor(
         input, dtype=dtypes.string, name="input")
-    if result_type == "SparseTensor" and input.shape.rank == 1:
-      return string_ops.string_split_v2(input, sep=sep, maxsplit=maxsplit)
 
-    ragged_result = string_split_v2(input, sep=sep, maxsplit=maxsplit)
+    if input.shape.rank == 0:
+      input = gen_array_ops.expand_dims(input, 0)
+
     if result_type == "SparseTensor":
-      return ragged_result.to_sparse()
+      if input.shape.rank == 1:
+        return string_ops.string_split_v2(input, sep=sep, maxsplit=maxsplit)
+      else:
+        return string_split_v2(input, sep=sep, maxsplit=maxsplit).to_sparse()
     elif result_type == "RaggedTensor":
-      return ragged_result
+      return string_split_v2(input, sep=sep, maxsplit=maxsplit)
     else:
       raise ValueError("result_type must be 'RaggedTensor' or 'SparseTensor'.")
 
@@ -647,6 +661,7 @@ def reduce_join(inputs, axis=None, keepdims=None, separator="", name=None):
 
 
 @tf_export("strings.ngrams")
+@dispatch.add_dispatch_support
 def ngrams(data,
            ngram_width,
            separator=" ",
@@ -674,6 +689,13 @@ def ngrams(data,
   width. In that case, no ngrams will be generated for that sequence. This can
   be prevented by setting `preserve_short_sequences`, which will cause the op
   to always generate at least one ngram per non-empty sequence.
+
+  Examples:
+
+  >>> tf.strings.ngrams(["A", "B", "C", "D"], 2).numpy()
+  array([b'A B', b'B C', b'C D'], dtype=object)
+  >>> tf.strings.ngrams(["TF", "and", "keras"], 1).numpy()
+  array([b'TF', b'and', b'keras'], dtype=object)
 
   Args:
     data: A Tensor or RaggedTensor containing the source data for the ngrams.

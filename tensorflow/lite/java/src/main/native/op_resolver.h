@@ -1,4 +1,4 @@
-/* Copyright 2018 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2020 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -12,18 +12,15 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
+#ifndef TENSORFLOW_LITE_JAVA_SRC_MAIN_NATIVE_OP_RESOLVER_H_
+#define TENSORFLOW_LITE_JAVA_SRC_MAIN_NATIVE_OP_RESOLVER_H_
 
-#include "tensorflow/core/kernels/cwise_ops_common.h"
+#include "tensorflow/lite/op_resolver.h"
 
-namespace tensorflow {
-REGISTER3(UnaryOp, CPU, "BesselI0e", functor::bessel_i0e, Eigen::half, float,
-          double);
-REGISTER3(UnaryOp, CPU, "BesselI1e", functor::bessel_i1e, Eigen::half, float,
-          double);
-#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
-REGISTER3(UnaryOp, GPU, "BesselI0e", functor::bessel_i0e, Eigen::half, float,
-          double);
-REGISTER3(UnaryOp, GPU, "BesselI1e", functor::bessel_i1e, Eigen::half, float,
-          double);
-#endif
-}  // namespace tensorflow
+namespace tflite {
+
+std::unique_ptr<OpResolver> CreateOpResolver();
+
+}
+
+#endif  // TENSORFLOW_LITE_JAVA_SRC_MAIN_NATIVE_OP_RESOLVER_H_

@@ -13,15 +13,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
+// Implementation for the DebugLog() function that prints to the UART on the
+// SparkFun Edge microcontroller. The same should work for other targets using
+// the Ambiq Apollo 3.
 
-#include "tensorflow/core/kernels/cwise_ops_gpu_common.cu.h"
+#include "tensorflow/lite/micro/debug_log.h"
 
-namespace tensorflow {
-namespace functor {
-DEFINE_UNARY3(bessel_i0e, Eigen::half, float, double);
-DEFINE_UNARY3(bessel_i1e, Eigen::half, float, double);
-}  // namespace functor
-}  // namespace tensorflow
+#include "hx_drv_tflm.h"
 
-#endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM
+extern "C" void DebugLog(const char* s) {
+  static bool is_initialized = false;
+  if (!is_initialized) {
+    hx_drv_uart_initial();
+    is_initialized = true;
+  }
+
+  hx_drv_uart_print("%s", s);
+}
